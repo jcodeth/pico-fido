@@ -47,6 +47,7 @@ static int vault_sdk_init(void) {
     primary.auth = fido_object_manifest_authenticator();
     primary.protector = fido_object_record_protector();
     if (!primary.auth || !primary.protector) {
+        log_errstr("vault init: missing object crypto provider auth=%p protector=%p", (void *)primary.auth, (void *)primary.protector);
         return PICOKEYS_EXEC_ERROR;
     }
     return picokeys_vault_init(&primary, NULL, ef_vault_key, file_search_by_fid(EF_VAULT_LABEL, NULL, SPECIFY_EF));
@@ -56,16 +57,20 @@ static const uint8_t vault_blob_magic[] = { 'P', 'K', 'V', 1 };
 
 static int vault_pin_auth(uint8_t protocol, const CborByteString *auth, const uint8_t *raw_params, size_t raw_params_len, uint64_t subcommand) {
     if (!auth->present) {
+        log_errstr("vault auth: missing PIN authentication present=%d protocol=%u len=%zu", auth->present, protocol, auth->len);
         return CTAP2_ERR_PUAT_REQUIRED;
     }
     if ((protocol != 1 && protocol != 2) || auth->len != (protocol == 1 ? 16u : 32u)) {
+        log_errstr("vault auth: invalid PIN authentication format protocol=%u len=%zu expected_len=%u", protocol, auth->len, protocol == 1 ? 16u : 32u);
         return CTAP2_ERR_PIN_AUTH_INVALID;
     }
     if (raw_params_len > CTAP_MAX_CBOR_PAYLOAD - 34u) {
+        log_errstr("vault auth: parameter payload too large len=%zu max=%u", raw_params_len, CTAP_MAX_CBOR_PAYLOAD - 34u);
         return CTAP2_ERR_LIMIT_EXCEEDED;
     }
     uint8_t *payload = calloc(1, 34u + raw_params_len);
     if (!payload) {
+        log_errstr("vault auth: parameter allocation failed len=%zu", 34u + raw_params_len);
         return CTAP2_ERR_PROCESSING;
     }
     memset(payload, 0xff, 32);
@@ -77,6 +82,7 @@ static int vault_pin_auth(uint8_t protocol, const CborByteString *auth, const ui
     int ret = verify(protocol, paut.data, payload, (uint16_t)(34u + raw_params_len), auth->data);
     free(payload);
     if (ret != 0 || !(paut.permissions & CTAP_PERMISSION_ACFG)) {
+        log_errstr("vault auth: verification or permission check failed ret=%d permissions=0x%02x required=0x%02x", ret, paut.permissions, CTAP_PERMISSION_ACFG);
         return CTAP2_ERR_PIN_AUTH_INVALID;
     }
     return 0;
@@ -84,6 +90,7 @@ static int vault_pin_auth(uint8_t protocol, const CborByteString *auth, const ui
 
 int vault_load_key(uint8_t key[VAULT_KEY_BYTES]) {
     if (!key || !ef_vault_key) {
+        log_errstr("vault load: vault key file unavailable key=%p vault_file=%p", (void *)key, (void *)ef_vault_key);
         return PICOKEYS_ERR_FILE_NOT_FOUND;
     }
     int ret = vault_sdk_init();
@@ -93,6 +100,7 @@ int vault_load_key(uint8_t key[VAULT_KEY_BYTES]) {
     uint8_t keydev[VAULT_KEY_BYTES] = { 0 };
     ret = load_keydev(keydev);
     if (ret != PICOKEYS_OK) {
+        log_errstr("vault load: device key load failed ret=%d", ret);
         mbedtls_platform_zeroize(keydev, sizeof(keydev));
         return ret;
     }
@@ -103,6 +111,7 @@ int vault_load_key(uint8_t key[VAULT_KEY_BYTES]) {
 
 int vault_enrollment_finish(const uint8_t *packet, size_t packet_len) {
     if (!ef_vault_key) {
+        log_errstr("vault enrollment: vault key file unavailable vault_file=%p", (void *)ef_vault_key);
         picokeys_vault_enrollment_reset();
         return PICOKEYS_ERR_FILE_NOT_FOUND;
     }
@@ -117,6 +126,9 @@ int vault_enrollment_finish(const uint8_t *packet, size_t packet_len) {
     uint8_t keydev[VAULT_KEY_BYTES] = { 0 };
     if (ret == PICOKEYS_OK) {
         ret = load_keydev(keydev);
+        if (ret != PICOKEYS_OK) {
+            log_errstr("vault enrollment: device key load failed ret=%d", ret);
+        }
     }
     if (ret == PICOKEYS_OK) {
         ret = picokeys_vault_set_kvault(kvault, keydev, VAULT_APP_ID);
@@ -135,9 +147,11 @@ int vault_enrollment_finish(const uint8_t *packet, size_t packet_len) {
 
 int vault_export_blob(const uint8_t *requested_id, size_t requested_id_len, uint8_t algorithm, uint8_t *blob, size_t blob_capacity, size_t *blob_len, uint8_t *metadata, size_t metadata_capacity, size_t *metadata_len) {
     if (!requested_id || requested_id_len == 0 || requested_id_len > MAX_CRED_ID_LENGTH || !blob || !blob_len || !metadata || !metadata_len) {
+        log_errstr("vault export: invalid arguments requested_id=%p requested_id_len=%zu blob=%p blob_len=%p metadata=%p metadata_len=%p", (void *)requested_id, requested_id_len, (void *)blob, (void *)blob_len, (void *)metadata, (void *)metadata_len);
         return PICOKEYS_ERR_NULL_PARAM;
     }
     if (!picokeys_vault_algorithm_valid(algorithm)) {
+        log_errstr("vault export: invalid algorithm actual=%u valid_min=%u valid_max=%u", algorithm, PICOKEYS_VAULT_ALGORITHM_CHACHAPOLY, PICOKEYS_VAULT_ALGORITHM_AESGCM_CHACHAPOLY);
         return PICOKEYS_WRONG_DATA;
     }
     Credential credential = {0};
@@ -161,6 +175,7 @@ int vault_export_blob(const uint8_t *requested_id, size_t requested_id_len, uint
         }
     }
     if (!found) {
+        log_errstr("vault export: credential not found requested_id_len=%zu", requested_id_len);
         return PICOKEYS_ERR_FILE_NOT_FOUND;
     }
     const uint8_t *key_seed = credential.id.data;
@@ -179,22 +194,36 @@ int vault_export_blob(const uint8_t *requested_id, size_t requested_id_len, uint
         }
         else {
             ret = PICOKEYS_WRONG_LENGTH;
+            log_errstr("vault export: stored private key too long len=%zu max=%zu", private_len, sizeof(private_key));
         }
     }
     else {
         ret = fido_load_key((int)credential.curve, key_seed, &credential_key);
+        if (ret != 0) {
+            log_errstr("vault export: credential key derivation failed ret=%d curve=%d", ret, credential.curve);
+        }
         if (ret == 0) {
             ret = mbedtls_ecp_write_key_ext(&credential_key, &private_len, private_key, sizeof(private_key));
+            if (ret != 0) {
+                log_errstr("vault export: credential private key serialization failed ret=%d capacity=%zu", ret, sizeof(private_key));
+            }
         }
     }
     mbedtls_ecp_keypair_free(&credential_key);
     if (ret != 0 || private_len == 0) {
+        if (ret == 0 && private_len == 0) {
+            log_errstr("vault export: credential private key is empty ret=%d private_len=%zu", ret, private_len);
+        }
         credential_free(&credential);
         mbedtls_platform_zeroize(private_key, sizeof(private_key));
         return PICOKEYS_EXEC_ERROR;
     }
     uint8_t embedded_metadata[VAULT_CREDENTIAL_METADATA_MAX] = {0};
-    if (vault_encode_credential_metadata(&credential, rp_id_hash, embedded_metadata, sizeof(embedded_metadata), metadata_len) != PICOKEYS_OK || *metadata_len > metadata_capacity) {
+    ret = vault_encode_credential_metadata(&credential, rp_id_hash, embedded_metadata, sizeof(embedded_metadata), metadata_len);
+    if (ret != PICOKEYS_OK || *metadata_len > metadata_capacity) {
+        if (ret == PICOKEYS_OK && *metadata_len > metadata_capacity) {
+            log_errstr("vault export: metadata output buffer too small len=%zu capacity=%zu", *metadata_len, metadata_capacity);
+        }
         credential_free(&credential);
         mbedtls_platform_zeroize(private_key, sizeof(private_key));
         return PICOKEYS_ERR_NO_MEMORY;
@@ -243,6 +272,9 @@ int vault_export_blob(const uint8_t *requested_id, size_t requested_id_len, uint
     if (error == CborNoError) {
         error = cbor_encoder_close_container(&plain_encoder, &plain_map);
     }
+    if (error != CborNoError) {
+        log_errstr("vault export: payload encoding failed cbor_error=%d", error);
+    }
     size_t plain_len = cbor_encoder_get_buffer_size(&plain_encoder, plain);
     uint8_t kvault[VAULT_KEY_BYTES] = {0};
     uint8_t vault_id[VAULT_ID_BYTES] = {0};
@@ -251,21 +283,35 @@ int vault_export_blob(const uint8_t *requested_id, size_t requested_id_len, uint
     size_t layer_count = picokeys_vault_algorithm_layers(algorithm);
     size_t nonce_len = layer_count * VAULT_BLOB_NONCE_BYTES;
     size_t total_len = VAULT_BLOB_HEADER_LEN + nonce_len + plain_len + layer_count * 16;
-    if (error == CborNoError && vault_load_key(kvault) != PICOKEYS_OK) {
-        error = CborErrorImproperValue;
+    if (error == CborNoError) {
+        ret = vault_load_key(kvault);
+        if (ret != PICOKEYS_OK) {
+            error = CborErrorImproperValue;
+        }
     }
-    if (error == CborNoError && (picokeys_vault_hash_kvault(kvault, vault_id) != PICOKEYS_OK || mbedtls_sha256(requested_id, requested_id_len, credential_hash, 0) != PICOKEYS_OK)) {
-        error = CborErrorImproperValue;
+    if (error == CborNoError) {
+        ret = picokeys_vault_hash_kvault(kvault, vault_id);
+        if (ret == PICOKEYS_OK) {
+            ret = mbedtls_sha256(requested_id, requested_id_len, credential_hash, 0);
+            if (ret != PICOKEYS_OK) {
+                log_errstr("vault export: credential ID hash failed ret=%d requested_id_len=%zu", ret, requested_id_len);
+            }
+        }
+        if (ret != PICOKEYS_OK) {
+            error = CborErrorImproperValue;
+        }
     }
     if (error == CborNoError) {
         for (size_t layer = 0; layer < layer_count; layer++) {
-            if (picokeys_vault_layer_key(kvault, vault_id, credential_hash, algorithm, (uint8_t)layer, blob_keys[layer]) != PICOKEYS_OK) {
+            ret = picokeys_vault_layer_key(kvault, vault_id, credential_hash, algorithm, (uint8_t)layer, blob_keys[layer]);
+            if (ret != PICOKEYS_OK) {
                 error = CborErrorImproperValue;
                 break;
             }
         }
     }
     if (error == CborNoError && (total_len > blob_capacity || plain_len == 0)) {
+        log_errstr("vault export: output buffer too small or empty payload total_len=%zu capacity=%zu plain_len=%zu", total_len, blob_capacity, plain_len);
         error = CborErrorOutOfMemory;
     }
     if (error == CborNoError) {
@@ -278,14 +324,20 @@ int vault_export_blob(const uint8_t *requested_id, size_t requested_id_len, uint
         random_fill_buffer(BYTE_ARRAY(blob + VAULT_BLOB_HEADER_LEN, nonce_len));
         if (layer_count == 1) {
             uint8_t algorithm_layer = picokeys_vault_algorithm_layer(algorithm, 0);
-            error = picokeys_vault_encrypt_layer(algorithm_layer, blob_keys[0], blob + VAULT_BLOB_HEADER_LEN, blob, VAULT_BLOB_HEADER_LEN, plain, plain_len, blob + VAULT_BLOB_HEADER_LEN + nonce_len, blob + VAULT_BLOB_HEADER_LEN + nonce_len + plain_len) == PICOKEYS_OK ? CborNoError : CborErrorImproperValue;
+            ret = picokeys_vault_encrypt_layer(algorithm_layer, blob_keys[0], blob + VAULT_BLOB_HEADER_LEN, blob, VAULT_BLOB_HEADER_LEN, plain, plain_len, blob + VAULT_BLOB_HEADER_LEN + nonce_len, blob + VAULT_BLOB_HEADER_LEN + nonce_len + plain_len);
+            if (ret != PICOKEYS_OK) {
+                error = CborErrorImproperValue;
+            }
         }
         else {
             uint8_t intermediate[VAULT_PLAIN_MAX + 16] = {0};
             uint8_t first_algorithm = picokeys_vault_algorithm_layer(algorithm, 0);
             uint8_t second_algorithm = picokeys_vault_algorithm_layer(algorithm, 1);
-            if (picokeys_vault_encrypt_layer(first_algorithm, blob_keys[0], blob + VAULT_BLOB_HEADER_LEN, blob, VAULT_BLOB_HEADER_LEN, plain, plain_len, intermediate, intermediate + plain_len) != PICOKEYS_OK
-                || picokeys_vault_encrypt_layer(second_algorithm, blob_keys[1], blob + VAULT_BLOB_HEADER_LEN + VAULT_BLOB_NONCE_BYTES, blob, VAULT_BLOB_HEADER_LEN, intermediate, plain_len + 16, blob + VAULT_BLOB_HEADER_LEN + nonce_len, blob + VAULT_BLOB_HEADER_LEN + nonce_len + plain_len + 16) != PICOKEYS_OK) {
+            ret = picokeys_vault_encrypt_layer(first_algorithm, blob_keys[0], blob + VAULT_BLOB_HEADER_LEN, blob, VAULT_BLOB_HEADER_LEN, plain, plain_len, intermediate, intermediate + plain_len);
+            if (ret == PICOKEYS_OK) {
+                ret = picokeys_vault_encrypt_layer(second_algorithm, blob_keys[1], blob + VAULT_BLOB_HEADER_LEN + VAULT_BLOB_NONCE_BYTES, blob, VAULT_BLOB_HEADER_LEN, intermediate, plain_len + 16, blob + VAULT_BLOB_HEADER_LEN + nonce_len, blob + VAULT_BLOB_HEADER_LEN + nonce_len + plain_len + 16);
+            }
+            if (ret != PICOKEYS_OK) {
                 error = CborErrorImproperValue;
             }
             mbedtls_platform_zeroize(intermediate, sizeof(intermediate));
@@ -303,19 +355,23 @@ int vault_export_blob(const uint8_t *requested_id, size_t requested_id_len, uint
 
 int vault_import_blob(const uint8_t *blob, size_t blob_len) {
     if (!blob || blob_len < VAULT_BLOB_HEADER_LEN + VAULT_BLOB_NONCE_BYTES + 16) {
+        log_errstr("vault import: invalid or short blob blob=%p blob_len=%zu min=%u", (void *)blob, blob_len, VAULT_BLOB_HEADER_LEN + VAULT_BLOB_NONCE_BYTES + 16u);
         return PICOKEYS_WRONG_DATA;
     }
     if (memcmp(blob, vault_blob_magic, sizeof(vault_blob_magic)) != 0) {
+        log_errstr("vault import: invalid blob magic actual=%02x%02x%02x%02x expected=%02x%02x%02x%02x", blob[0], blob[1], blob[2], blob[3], vault_blob_magic[0], vault_blob_magic[1], vault_blob_magic[2], vault_blob_magic[3]);
         return PICOKEYS_WRONG_DATA;
     }
     size_t header_len = VAULT_BLOB_HEADER_LEN;
     uint8_t algorithm = blob[VAULT_BLOB_ALGORITHM_OFFSET];
     if (!picokeys_vault_algorithm_valid(algorithm) || blob[VAULT_BLOB_SERIAL_LEN_OFFSET] > VAULT_BLOB_SERIAL_MAX) {
+        log_errstr("vault import: invalid algorithm or serial length algorithm=%u serial_len=%u serial_max=%u", algorithm, blob[VAULT_BLOB_SERIAL_LEN_OFFSET], VAULT_BLOB_SERIAL_MAX);
         return PICOKEYS_WRONG_DATA;
     }
     size_t layer_count = picokeys_vault_algorithm_layers(algorithm);
     size_t nonce_len = layer_count * VAULT_BLOB_NONCE_BYTES;
     if (blob_len < header_len + nonce_len + layer_count * 16) {
+        log_errstr("vault import: blob truncated blob_len=%zu required=%zu algorithm=%u layers=%zu", blob_len, header_len + nonce_len + layer_count * 16u, algorithm, layer_count);
         return PICOKEYS_WRONG_DATA;
     }
     uint8_t kvault[VAULT_KEY_BYTES] = {0};
@@ -329,6 +385,7 @@ int vault_import_blob(const uint8_t *blob, size_t blob_len) {
     }
     if (ret == PICOKEYS_OK && mbedtls_ct_memcmp(vault_id, blob + 4, VAULT_ID_BYTES) != 0) {
         ret = PICOKEYS_VERIFICATION_FAILED;
+        log_errstr("vault import: vault ID mismatch compared_len=%u", VAULT_ID_BYTES);
     }
     if (ret == PICOKEYS_OK) {
         for (size_t layer = 0; layer < layer_count; layer++) {
@@ -342,6 +399,7 @@ int vault_import_blob(const uint8_t *blob, size_t blob_len) {
     size_t plain_len = encrypted_len - layer_count * 16;
     if (ret == PICOKEYS_OK && plain_len > sizeof(plain)) {
         ret = PICOKEYS_WRONG_LENGTH;
+        log_errstr("vault import: decrypted payload too large len=%zu max=%zu", plain_len, sizeof(plain));
     }
     if (ret == PICOKEYS_OK) {
         if (layer_count == 1) {
@@ -393,6 +451,7 @@ int vault_import_blob(const uint8_t *blob, size_t blob_len) {
         CBOR_PARSE_MAP_END(map, 1);
         if (!cbor_value_at_end(&map) || !version_present || version != 1 || !credential_id.present || credential_id.len == 0 || credential_id.len > MAX_CRED_ID_LENGTH || !private_key.present || private_key.len == 0 || private_key.len > CREDENTIAL_PRIVATE_KEY_MAX || !rp_id.present || rp_id.len == 0 || !metadata.present || metadata.len == 0 || metadata.len > VAULT_CREDENTIAL_METADATA_MAX || !requested_id.present || requested_id.len == 0 || requested_id.len > MAX_CRED_ID_LENGTH) {
             error = CborErrorImproperValue;
+            log_errstr("vault import: decrypted credential payload invalid version_present=%d version=%llu credential_id_present=%d credential_id_len=%zu private_key_present=%d private_key_len=%zu rp_id_present=%d rp_id_len=%zu metadata_present=%d metadata_len=%zu requested_id_present=%d requested_id_len=%zu", version_present, (unsigned long long)version, credential_id.present, credential_id.len, private_key.present, private_key.len, rp_id.present, rp_id.len, metadata.present, metadata.len, requested_id.present, requested_id.len);
         }
     }
     if (ret == PICOKEYS_OK && error == CborNoError) {
@@ -422,6 +481,7 @@ err:
     mbedtls_platform_zeroize(plain, sizeof(plain));
     mbedtls_platform_zeroize(intermediate, sizeof(intermediate));
     if (error != CborNoError) {
+        log_errstr("vault import: CBOR parsing failed cbor_error=%d", error);
         return PICOKEYS_WRONG_DATA;
     }
     return ret == 0 ? PICOKEYS_OK : ret;
@@ -429,6 +489,7 @@ err:
 
 int vault_encode_credential_metadata(const Credential *credential, const uint8_t rp_id_hash[RP_ID_HASH_LEN], uint8_t *buffer, size_t buffer_len, size_t *metadata_len) {
     if (!credential || !rp_id_hash || !buffer || !metadata_len) {
+        log_errstr("vault metadata: invalid arguments credential=%p rp_id_hash=%p buffer=%p metadata_len=%p buffer_len=%zu", (void *)credential, (void *)rp_id_hash, (void *)buffer, (void *)metadata_len, buffer_len);
         return PICOKEYS_ERR_NULL_PARAM;
     }
     CborEncoder encoder, mapEncoder, mapEncoder2;
@@ -509,6 +570,7 @@ int vault_encode_credential_metadata(const Credential *credential, const uint8_t
     *metadata_len = cbor_encoder_get_buffer_size(&encoder, buffer);
     return PICOKEYS_OK;
 err:
+    log_errstr("vault metadata: CBOR encoding failed: %d", error);
     return PICOKEYS_ERR_NO_MEMORY;
 }
 
@@ -661,6 +723,7 @@ err:
         return CborNoError;
     }
     if (error != CborNoError) {
+        log_errstr("vault command: response encoding failed vendor_cmd=%llu cbor_error=%d", (unsigned long long)vendorCmd, error);
         return error;
     }
     if (response_started) {

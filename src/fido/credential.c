@@ -774,6 +774,7 @@ static bool credential_algorithm_matches_curve(int64_t algorithm, int64_t curve)
 
 int credential_import(const credential_import_record_t *record) {
     if (!record || !record->credential_id || !record->private_key || !record->rp_id || !record->metadata || !record->requested_id || !record->credential_hash || record->credential_id_len == 0 || record->credential_id_len > MAX_CRED_ID_LENGTH || record->private_key_len == 0 || record->private_key_len > CREDENTIAL_PRIVATE_KEY_MAX || record->rp_id_len == 0 || record->metadata_len == 0 || record->requested_id_len == 0 || record->requested_id_len > MAX_CRED_ID_LENGTH) {
+        log_errstr("credential import: invalid arguments record=%p credential_id=%p credential_id_len=%zu private_key=%p private_key_len=%zu rp_id=%p rp_id_len=%zu metadata=%p metadata_len=%zu requested_id=%p requested_id_len=%zu credential_hash=%p", (void *)record, record ? (void *)record->credential_id : NULL, record ? record->credential_id_len : 0, record ? (void *)record->private_key : NULL, record ? record->private_key_len : 0, record ? (void *)record->rp_id : NULL, record ? record->rp_id_len : 0, record ? (void *)record->metadata : NULL, record ? record->metadata_len : 0, record ? (void *)record->requested_id : NULL, record ? record->requested_id_len : 0, record ? (void *)record->credential_hash : NULL);
         return PICOKEYS_ERR_NULL_PARAM;
     }
     Credential parsed = {0};
@@ -782,10 +783,12 @@ int credential_import(const credential_import_record_t *record) {
     uint8_t rp_id_hash[RP_ID_HASH_LEN] = {0};
     uint8_t credential_hash[RP_ID_HASH_LEN] = {0};
     if (ret != PICOKEYS_OK || !parsed.rpId.present || !parsed.rpIdHash.present || parsed.rpIdHash.len != RP_ID_HASH_LEN || parsed.rpId.len != record->rp_id_len || mbedtls_ct_memcmp(parsed.rpId.data, record->rp_id, record->rp_id_len) != 0 || !credential_algorithm_matches_curve(parsed.alg, parsed.curve) || curve == MBEDTLS_ECP_DP_NONE) {
+        log_errstr("credential import: metadata validation failed parse_ret=%d rp_id=\"%.*s\" rp_id_present=%d rp_id_len=%zu expected_len=%zu algorithm=%d curve=%d", ret, parsed.rpId.present ? (int)(parsed.rpId.len > 32u ? 32u : parsed.rpId.len) : 0, parsed.rpId.present ? parsed.rpId.data : "", parsed.rpId.present, parsed.rpId.len, record->rp_id_len, parsed.alg, parsed.curve);
         credential_free(&parsed);
         return PICOKEYS_WRONG_DATA;
     }
     if (mbedtls_sha256(record->rp_id, record->rp_id_len, rp_id_hash, 0) != 0 || mbedtls_sha256(record->requested_id, record->requested_id_len, credential_hash, 0) != 0 || mbedtls_ct_memcmp(parsed.rpIdHash.data, rp_id_hash, sizeof(rp_id_hash)) != 0 || mbedtls_ct_memcmp(record->credential_hash, credential_hash, sizeof(credential_hash)) != 0) {
+        log_errstr("credential import: identifier validation failed rp_id_len=%zu requested_id_len=%zu expected_hash_len=%u", record->rp_id_len, record->requested_id_len, RP_ID_HASH_LEN);
         credential_free(&parsed);
         return PICOKEYS_WRONG_DATA;
     }
@@ -805,11 +808,15 @@ int credential_import(const credential_import_record_t *record) {
         public_key_len = cbor_encoder_get_buffer_size(&encoder, public_key);
     }
     if (ret == 0 && error != CborNoError) {
+        log_errstr("credential import: COSE encoding failed ret=%d cbor_error=%d", ret, error);
         ret = PICOKEYS_EXEC_ERROR;
     }
     uint8_t client_id[CRED_RESIDENT_LEN] = {0};
     if (ret == 0 && error == CborNoError) {
         ret = credential_derive_resident(record->credential_id, record->credential_id_len, client_id);
+        if (ret != PICOKEYS_OK) {
+            log_errstr("credential import: resident ID derivation failed ret=%d credential_id_len=%zu", ret, record->credential_id_len);
+        }
     }
     int slot = -1;
     if (ret == 0) {
@@ -821,10 +828,14 @@ int credential_import(const credential_import_record_t *record) {
         }
         if (slot < 0) {
             ret = PICOKEYS_ERR_MEMORY_FATAL;
+            log_errstr("credential import: no resident credential slot available max_slots=%u", MAX_RESIDENT_CREDENTIALS);
         }
     }
     if (ret == PICOKEYS_OK) {
         ret = resident_container_create_imported((uint8_t)slot, rp_id_hash, client_id, sizeof(client_id), record->credential_id, record->credential_id_len, public_key, public_key_len, record->private_key, record->private_key_len, record->metadata, record->metadata_len);
+        if (ret != PICOKEYS_OK) {
+            log_errstr("credential import: resident storage failed ret=%d slot=%d public_key_len=%zu", ret, slot, public_key_len);
+        }
     }
     if (ret == PICOKEYS_OK) {
         dev_state_update(DEV_STATE_CRED_STATE);
