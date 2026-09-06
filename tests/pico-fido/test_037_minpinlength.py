@@ -99,7 +99,7 @@ def test_setminpin_too_many_rpids(device):
     device.reset()
     ClientPin(device.client()._backend.ctap2).set_pin(PIN)
     cfg = FidoConfig(device)
-    # Keep the encoded Config request below GetInfo.maxMsgSize (1024).  Recent
+    # Keep the encoded Config request below GetInfo.maxMsgSize (1024). Recent
     # python-fido2 releases reject oversized requests locally, before the
     # authenticator can enforce its maxRPIDsForSetMinPINLength limit.
     rp_ids = [f"r{i}" for i in range(MAX_RPIDS_MINPIN_LENGTH + 1)]
