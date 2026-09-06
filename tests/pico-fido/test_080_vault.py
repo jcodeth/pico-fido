@@ -18,6 +18,7 @@ from fido2.ctap import CtapError
 from fido2.ctap2 import Ctap2, CredentialManagement
 from fido2.ctap2.pin import ClientPin, PinProtocolV2
 from fido2.hid import CTAPHID
+from pico_vault_enroller.crypto import _hpke_auth_decrypt, _hpke_auth_encrypt
 
 
 VAULT_MAGIC = b"PKV1"
@@ -37,6 +38,7 @@ DEFAULT_ENROLLMENT = Path.home() / ".config" / "PicoKeys" / "vault" / "enrollmen
 VAULT_STATUS = 0x01
 VAULT_ENROLL_BEGIN = 0x02
 VAULT_ENROLL_FINISH = 0x03
+VAULT_ENROLLMENT_PROTOCOL = 2
 VAULT_EXPORT = 0x04
 VAULT_IMPORT = 0x05
 VAULT_UNENROLL = 0x06
@@ -67,16 +69,11 @@ def _open_enrollment(value, passphrase):
 
 
 def _enrollment_packet(certificate, private_key, device_public, challenge, kvault, label):
-    certificate_public = private_key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
-    info = ENROLL_INFO + challenge + certificate_public + device_public
-    shared = private_key.exchange(x448.X448PublicKey.from_public_bytes(device_public))
-    session_key = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=info).derive(shared)
     label_bytes = label.encode()
     if len(label_bytes) > LABEL_MAX:
         raise ValueError("vault label is too long")
     plain = kvault + bytes([len(label_bytes)]) + label_bytes
-    nonce = os.urandom(12)
-    return struct.pack(">H", len(certificate)) + certificate + nonce + AESGCM(session_key).encrypt(nonce, plain, info)
+    return struct.pack(">H", len(certificate)) + certificate + _hpke_auth_encrypt(certificate, private_key, device_public, challenge, plain)
 
 
 def _aead(algorithm, key, encrypt, nonce, data, aad):
@@ -243,9 +240,11 @@ def test_tampered_enrollment_json_is_rejected():
 def test_enrollment_packet_accepts_label_boundaries(label):
     private_key = x448.X448PrivateKey.generate()
     device_private = x448.X448PrivateKey.generate()
-    packet = _enrollment_packet(b"certificate", private_key, device_private.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw), bytes(range(32)), bytes(range(32)), label)
+    certificate = b"certificate"
+    device_public = device_private.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    packet = _enrollment_packet(certificate, private_key, device_public, bytes(range(32)), bytes(range(32)), label)
     assert int.from_bytes(packet[:2], "big") == len(b"certificate")
-    assert packet[2 + len(b"certificate") + 12:]
+    assert packet[2 + len(b"certificate") + 56:]
 
 
 def test_enrollment_packet_rejects_oversized_label_before_encryption():
@@ -260,16 +259,12 @@ def test_enrollment_packet_tampering_fails_authentication():
     challenge = bytes(range(32))
     kvault = bytes(range(32))
     packet = _enrollment_packet(b"certificate", private_key, device_private.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw), challenge, kvault, "label")
-    packet = bytearray(packet)
-    packet[-1] ^= 1
     certificate_len = int.from_bytes(packet[:2], "big")
-    device_public = device_private.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
     certificate_public = private_key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
-    info = ENROLL_INFO + challenge + certificate_public + device_public
-    shared = private_key.exchange(x448.X448PublicKey.from_public_bytes(device_public))
-    session_key = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=info).derive(shared)
+    encrypted = bytearray(packet[2 + certificate_len:])
+    encrypted[-1] ^= 1
     with pytest.raises(InvalidTag):
-        AESGCM(session_key).decrypt(bytes(packet[2 + certificate_len:2 + certificate_len + 12]), bytes(packet[2 + certificate_len + 12:]), info)
+        _hpke_auth_decrypt(b"certificate", device_private, certificate_public, challenge, bytes(encrypted))
 
 
 @pytest.mark.parametrize("algorithm", sorted(ALGORITHMS))
@@ -332,6 +327,7 @@ def test_live_vault_status_contract(request):
     assert code == 0
     assert isinstance(status.get(1, b""), bytes)
     assert len(status.get(1, b"")) in (0, VAULT_ID_BYTES)
+    assert status.get(6) == VAULT_ENROLLMENT_PROTOCOL
 
 
 def test_live_vault_commands_require_pin(request):

@@ -598,7 +598,7 @@ CborError vault_vendor_command(uint64_t vendorCmd, CborByteString vendorParam, C
             picokeys_vault_get_label(&label_output);
             label_len = label_output.len;
         }
-        CBOR_CHECK(cbor_encoder_create_map(&encoder, &mapEncoder, 5));
+        CBOR_CHECK(cbor_encoder_create_map(&encoder, &mapEncoder, 6));
         response_started = true;
         CBOR_CHECK(cbor_encode_uint(&mapEncoder, 0x01));
         CBOR_CHECK(cbor_encode_byte_string(&mapEncoder, vault_id, enrolled ? sizeof(vault_id) : 0));
@@ -610,6 +610,8 @@ CborError vault_vendor_command(uint64_t vendorCmd, CborByteString vendorParam, C
         CBOR_CHECK(cbor_encode_boolean(&mapEncoder, stored));
         CBOR_CHECK(cbor_encode_uint(&mapEncoder, 0x05));
         CBOR_CHECK(cbor_encode_text_string(&mapEncoder, (const char *)label, label_len));
+        CBOR_CHECK(cbor_encode_uint(&mapEncoder, 0x06));
+        CBOR_CHECK(cbor_encode_uint(&mapEncoder, VAULT_ENROLLMENT_PROTOCOL));
         mbedtls_platform_zeroize(label, sizeof(label));
         mbedtls_platform_zeroize(kvault, sizeof(kvault));
     }
