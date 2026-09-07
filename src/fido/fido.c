@@ -208,7 +208,7 @@ static int x509_create_cert(mbedtls_ecdsa_context *ecdsa, uint8_t *buffer, size_
     mbedtls_x509write_crt_set_serial_raw(&ctx, serial, sizeof(serial));
     mbedtls_pk_context key;
     mbedtls_pk_init(&key);
-    mbedtls_pk_setup(&key, mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY));
+    key.pk_info = mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY);
     key.pk_ctx = ecdsa;
     mbedtls_x509write_crt_set_subject_key(&ctx, &key);
     mbedtls_x509write_crt_set_issuer_key(&ctx, &key);
