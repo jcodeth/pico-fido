@@ -28,6 +28,16 @@ def test_register(device):
     device.reset()
     REGRes,AUTData = device.register()
 
+def test_make_credential_counter_advances(device):
+    device.reset()
+    try:
+        first = device.MC()['res']
+        second = device.MC()['res']
+
+        assert second.auth_data.counter == first.auth_data.counter + 1
+    finally:
+        device.reset()
+
 def test_make_credential():
     pass
 
@@ -50,7 +60,7 @@ def test_missing_cdh(device):
 
 def test_bad_type_cdh(device):
     with pytest.raises(CtapError) as e:
-        device.MC(client_data_hash=b'\xff')
+        device.MC(client_data_hash={"type": "wrong"})
 
 def test_missing_user(device):
     with pytest.raises(CtapError) as e:
