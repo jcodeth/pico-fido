@@ -340,10 +340,15 @@ int cbor_config(const uint8_t *data, size_t len) {
         else if (newMinPinLength > 0 && newMinPinLength < currentMinPinLen) {
             CBOR_ERROR(CTAP2_ERR_PIN_POLICY_VIOLATION);
         }
-        if (forceChangePin == ptrue && !file_has_data(ef_pin)) {
+        bool pin_set = file_has_data(ef_pin);
+        uint8_t pin_header[2] = { 0 };
+        if (forceChangePin == ptrue && !pin_set) {
             CBOR_ERROR(CTAP2_ERR_PIN_NOT_SET);
         }
-        if (file_has_data(ef_pin) && file_get_data(ef_pin)[1] < newMinPinLength) {
+        if (pin_set && file_read_at(ef_pin, 0, BYTE_ARRAY(pin_header, sizeof(pin_header))) != PICOKEYS_OK) {
+            CBOR_ERROR(CTAP2_ERR_PROCESSING);
+        }
+        if (pin_set && pin_header[1] < newMinPinLength) {
             forceChangePin = ptrue;
         }
         if (forceChangePin) {
