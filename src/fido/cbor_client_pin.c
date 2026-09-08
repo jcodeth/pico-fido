@@ -48,8 +48,19 @@ static bool minpin_record_has_header(const file_t *ef) {
     return file_has_data(ef) && file_get_size(ef) >= 2;
 }
 
+static int minpin_read_length(const file_t *ef, uint8_t *min_pin) {
+    if (!min_pin) {
+        return PICOKEYS_ERR_NULL_PARAM;
+    }
+    *min_pin = 4;
+    if (!ef || !ef->data) {
+        return PICOKEYS_OK;
+    }
+    return file_read_at(ef, 0, BYTE_ARRAY(min_pin, sizeof(*min_pin)));
+}
+
 static bool minpin_force_change_pending(const file_t *ef) {
-    if (!file_has_data(ef)) {
+    if (!ef || !ef->data) {
         return false;
     }
 
@@ -531,8 +542,8 @@ int cbor_client_pin(const uint8_t *data, size_t len) {
         uint16_t pin_codepoints = pin_codepoint_len(paddedNewPin, pin_byte_len);
         uint8_t minPin = 4;
         file_t *ef_minpin = file_search_by_fid(EF_MINPINLEN, NULL, SPECIFY_EF);
-        if (minpin_record_has_header(ef_minpin)) {
-            minPin = *file_get_data(ef_minpin);
+        if (minpin_read_length(ef_minpin, &minPin) != PICOKEYS_OK) {
+            CBOR_ERROR(CTAP2_ERR_PROCESSING);
         }
         if (pin_codepoints < minPin) {
             CBOR_ERROR(CTAP2_ERR_PIN_POLICY_VIOLATION);
@@ -709,8 +720,8 @@ int cbor_client_pin(const uint8_t *data, size_t len) {
         uint16_t pin_codepoints = pin_codepoint_len(paddedNewPin, pin_byte_len);
         uint8_t minPin = 4;
         file_t *ef_minpin = file_search_by_fid(EF_MINPINLEN, NULL, SPECIFY_EF);
-        if (minpin_record_has_header(ef_minpin)) {
-            minPin = *file_get_data(ef_minpin);
+        if (minpin_read_length(ef_minpin, &minPin) != PICOKEYS_OK) {
+            CBOR_ERROR(CTAP2_ERR_PROCESSING);
         }
         if (pin_codepoints < minPin) {
             CBOR_ERROR(CTAP2_ERR_PIN_POLICY_VIOLATION);

@@ -328,8 +328,8 @@ int cbor_config(const uint8_t *data, size_t len) {
     else if (subcommand == 0x03) {
         uint8_t currentMinPinLen = 4;
         file_t *ef_minpin = file_search_by_fid(EF_MINPINLEN, NULL, SPECIFY_EF);
-        if (file_has_data(ef_minpin)) {
-            currentMinPinLen = *file_get_data(ef_minpin);
+        if (ef_minpin && ef_minpin->data && file_read_at(ef_minpin, 0, BYTE_ARRAY(&currentMinPinLen, sizeof(currentMinPinLen))) != PICOKEYS_OK) {
+            CBOR_ERROR(CTAP2_ERR_PROCESSING);
         }
         if (newMinPinLength == 0) {
             newMinPinLength = currentMinPinLen;
