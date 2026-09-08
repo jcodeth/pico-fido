@@ -291,9 +291,21 @@ bool otp_container_is_marker(const file_t *file) {
            data[FIDO_OTP_CONTAINER_MARKER_RESERVED_1_OFFSET] == FIDO_OTP_CONTAINER_MARKER_RESERVED_VALUE;
 }
 
-bool otp_container_has_slot(uint8_t slot) {
+int otp_container_has_slot(uint8_t slot, bool *present) {
+    if (!otp_slot_valid(slot) || !present) {
+        return PICOKEYS_WRONG_DATA;
+    }
     uint8_t active = 0;
-    return otp_slot_valid(slot) && otp_active_slots_read(&active) == PICOKEYS_OK && (active & (1u << slot)) != 0;
+    int r = otp_active_slots_read(&active);
+    if (r == PICOKEYS_ERR_FILE_NOT_FOUND) {
+        *present = false;
+        return PICOKEYS_OK;
+    }
+    if (r != PICOKEYS_OK) {
+        return r;
+    }
+    *present = (active & (1u << slot)) != 0;
+    return PICOKEYS_OK;
 }
 
 static file_object_container_write_t otp_write(uint16_t object_type, uint16_t object_tag, const uint8_t *data, size_t data_size) {
@@ -380,7 +392,12 @@ static int otp_container_bank_commit(uint8_t active, const otp_container_slot_t 
 }
 
 int otp_container_read_slot(uint8_t slot, byte_buffer_t *data) {
-    if (!otp_slot_valid(slot) || !data || !otp_container_has_slot(slot)) {
+    bool present = false;
+    int r = otp_container_has_slot(slot, &present);
+    if (r != PICOKEYS_OK) {
+        return r;
+    }
+    if (!data || !present) {
         return PICOKEYS_ERR_FILE_NOT_FOUND;
     }
     return otp_container_read_object(slot, FIDO_OTP_OBJECT_SECRET, data);
@@ -413,12 +430,17 @@ int otp_container_write_slot(uint8_t slot, const uint8_t *data, size_t data_size
 }
 
 int otp_container_delete_slot(uint8_t slot) {
-    if (!otp_slot_valid(slot) || !otp_container_has_slot(slot)) {
+    bool present = false;
+    int r = otp_container_has_slot(slot, &present);
+    if (r != PICOKEYS_OK) {
+        return r;
+    }
+    if (!present) {
         return PICOKEYS_ERR_FILE_NOT_FOUND;
     }
     uint8_t active = 0;
     otp_container_slot_t slots[FIDO_OTP_SLOT_COUNT];
-    int r = otp_container_bank_load(&active, slots);
+    r = otp_container_bank_load(&active, slots);
     if (r != PICOKEYS_OK) {
         mbedtls_platform_zeroize(slots, sizeof(slots));
         return r;
@@ -430,12 +452,25 @@ int otp_container_delete_slot(uint8_t slot) {
 }
 
 int otp_container_swap_slots(uint8_t slot1, bool present1, const uint8_t *data1, size_t data1_size, const uint8_t *metadata1, size_t metadata1_size, uint8_t slot2, bool present2, const uint8_t *data2, size_t data2_size, const uint8_t *metadata2, size_t metadata2_size) {
-    if (!otp_slot_valid(slot1) || !otp_slot_valid(slot2) || slot1 == slot2 || present1 != otp_container_has_slot(slot1) || present2 != otp_container_has_slot(slot2) || (present1 && (!data1 || !metadata1 || data1_size > FIDO_OTP_SECRET_MAX_SIZE || metadata1_size > FIDO_OTP_METADATA_MAX_SIZE)) || (present2 && (!data2 || !metadata2 || data2_size > FIDO_OTP_SECRET_MAX_SIZE || metadata2_size > FIDO_OTP_METADATA_MAX_SIZE))) {
+    if (!otp_slot_valid(slot1) || !otp_slot_valid(slot2) || slot1 == slot2) {
+        return PICOKEYS_WRONG_DATA;
+    }
+    bool actual1 = false;
+    bool actual2 = false;
+    int r = otp_container_has_slot(slot1, &actual1);
+    if (r != PICOKEYS_OK) {
+        return r;
+    }
+    r = otp_container_has_slot(slot2, &actual2);
+    if (r != PICOKEYS_OK) {
+        return r;
+    }
+    if (present1 != actual1 || present2 != actual2 || (present1 && (!data1 || !metadata1 || data1_size > FIDO_OTP_SECRET_MAX_SIZE || metadata1_size > FIDO_OTP_METADATA_MAX_SIZE)) || (present2 && (!data2 || !metadata2 || data2_size > FIDO_OTP_SECRET_MAX_SIZE || metadata2_size > FIDO_OTP_METADATA_MAX_SIZE))) {
         return PICOKEYS_WRONG_DATA;
     }
     uint8_t active = 0;
     otp_container_slot_t slots[FIDO_OTP_SLOT_COUNT];
-    int r = otp_container_bank_load(&active, slots);
+    r = otp_container_bank_load(&active, slots);
     if (r != PICOKEYS_OK) {
         mbedtls_platform_zeroize(slots, sizeof(slots));
         return r;

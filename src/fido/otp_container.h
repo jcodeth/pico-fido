@@ -23,7 +23,7 @@
 #define FIDO_OTP_SLOT_COUNT 4u
 
 bool otp_container_is_marker(const file_t *file);
-bool otp_container_has_slot(uint8_t slot);
+int otp_container_has_slot(uint8_t slot, bool *present);
 int otp_container_read_slot(uint8_t slot, byte_buffer_t *data);
 int otp_container_write_slot(uint8_t slot, const uint8_t *data, size_t data_size, const uint8_t *metadata, size_t metadata_size);
 int otp_container_delete_slot(uint8_t slot);
