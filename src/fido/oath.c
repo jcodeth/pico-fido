@@ -785,13 +785,18 @@ static int cmd_set_code(void) {
     if (mbedtls_ct_memcmp(hmac, resp.data, resp.len) != 0) {
         return SW_DATA_INVALID();
     }
+
+    validated = false;
+    file_t *ef_otp_pin = file_search_by_fid(EF_OTP_PIN, NULL, SPECIFY_EF);
+    if (file_has_data(ef_otp_pin) && flash_clear_file(ef_otp_pin) != PICOKEYS_OK) {
+        return SW_MEMORY_FAILURE();
+    }
     random_fill_buffer(BYTE_ARRAY(challenge, sizeof(challenge)));
     file_t *ef = file_new(EF_OATH_CODE);
-    if (oath_put_code_key(ef, key.data, key.len) != PICOKEYS_OK) {
+    if (ef == NULL || oath_put_code_key(ef, key.data, key.len) != PICOKEYS_OK) {
         return SW_EXEC_ERROR();
     }
     flash_commit();
-    validated = false;
     return SW_OK();
 }
 

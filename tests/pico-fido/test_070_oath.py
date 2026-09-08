@@ -318,6 +318,37 @@ def test_auth(reset_oath):
         list_apdu(reset_oath)
     assert [e.value.sw1, e.value.sw2] == [0x69, 0x82]
 
+def test_set_code_revokes_otp_pin(reset_oath):
+    pin = list(b"123456")
+    send_apdu(
+        reset_oath,
+        INS_SET_PIN,
+        p1=0,
+        p2=0,
+        data=[TAG_PASSWORD, len(pin)] + pin,
+    )
+
+    key = list(bytes(b"kaka blahonga"))
+    chal = [1, 2, 3, 4, 5, 6, 7, 8]
+    response = list(hmac.digest(bytes(key), bytes(chal), "sha1"))
+    data = (
+        [TAG_KEY, len(key) + 1, ALG_SHA1 | TYPE_TOTP] + key +
+        [TAG_CHALLENGE, len(chal)] + chal +
+        [TAG_RESPONSE, len(response)] + response
+    )
+    send_apdu(reset_oath, INS_SET_CODE, p1=0, p2=0, data=data)
+
+    reset_oath.connection.reconnect()
+    with pytest.raises(APDUResponse) as e:
+        send_apdu(
+            reset_oath,
+            INS_VERIFY_PIN,
+            p1=0,
+            p2=0,
+            data=[TAG_PASSWORD, len(pin)] + pin,
+        )
+    assert [e.value.sw1, e.value.sw2] == [0x69, 0x85]
+
 def test_bothoath(reset_oath):
     digits = 6
     tname = list(bytes(b'totp'))
