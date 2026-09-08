@@ -205,7 +205,10 @@ static int oath_layout_deactivate(void *ctx, uint32_t container_id) {
         for (uint16_t object_type = FIDO_OATH_OBJECT_CREDENTIAL; object_type <= FIDO_OATH_OBJECT_METADATA; object_type++) {
             file_t *record = file_search(oath_record_fid(slot, manifest_slot, object_type));
             if (record) {
-                file_delete_no_commit(record);
+                int ret = file_delete_no_commit(record);
+                if (ret != PICOKEYS_OK) {
+                    return ret;
+                }
             }
         }
     }

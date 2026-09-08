@@ -721,7 +721,7 @@ static int cmd_delete(void) {
     if (tlv_find_tag(&ctxi, TAG_NAME, &ctxo) == true) {
         uint16_t fid = 0;
         if (find_oath_cred(ctxo.data, ctxo.len, &fid)) {
-            return oath_credential_delete(fid) == PICOKEYS_OK ? SW_OK() : SW_EXEC_ERROR();
+            return oath_credential_delete(fid) == PICOKEYS_OK ? SW_OK() : SW_MEMORY_FAILURE();
         }
         return SW_DATA_INVALID();
     }
@@ -746,9 +746,9 @@ static int cmd_set_code(void) {
         return SW_SECURITY_STATUS_NOT_SATISFIED();
     }
     if (apdu.nc == 0) {
-        file_delete(file_search(EF_OATH_CODE));
+        int ret = file_delete(file_search(EF_OATH_CODE));
         validated = true;
-        return SW_OK();
+        return ret == PICOKEYS_OK ? SW_OK() : SW_MEMORY_FAILURE();
     }
     tlv_ctx_t ctxi, key = { 0 }, chal = { 0 }, resp = { 0 };
     tlv_ctx_init(BYTE_ARRAY(apdu.data, apdu.nc), &ctxi);
@@ -759,9 +759,9 @@ static int cmd_set_code(void) {
         return SW_WRONG_DATA();
     }
     if (key.len == 0) {
-        file_delete(file_search(EF_OATH_CODE));
+        int ret = file_delete(file_search(EF_OATH_CODE));
         validated = true;
-        return SW_OK();
+        return ret == PICOKEYS_OK ? SW_OK() : SW_MEMORY_FAILURE();
     }
     if (tlv_find_tag(&ctxi, TAG_CHALLENGE, &chal) == false) {
         return SW_INCORRECT_PARAMS();
