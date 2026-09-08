@@ -291,7 +291,7 @@ bool otp_container_is_marker(const file_t *file) {
            data[FIDO_OTP_CONTAINER_MARKER_RESERVED_1_OFFSET] == FIDO_OTP_CONTAINER_MARKER_RESERVED_VALUE;
 }
 
-int otp_container_has_slot(uint8_t slot, bool *present) {
+int otp_container_has_slot_status(uint8_t slot, bool *present) {
     if (!otp_slot_valid(slot) || !present) {
         return PICOKEYS_WRONG_DATA;
     }
@@ -306,6 +306,11 @@ int otp_container_has_slot(uint8_t slot, bool *present) {
     }
     *present = (active & (1u << slot)) != 0;
     return PICOKEYS_OK;
+}
+
+bool otp_container_has_slot(uint8_t slot) {
+    bool present = false;
+    return otp_container_has_slot_status(slot, &present) == PICOKEYS_OK && present;
 }
 
 static file_object_container_write_t otp_write(uint16_t object_type, uint16_t object_tag, const uint8_t *data, size_t data_size) {
@@ -393,7 +398,7 @@ static int otp_container_bank_commit(uint8_t active, const otp_container_slot_t 
 
 int otp_container_read_slot(uint8_t slot, byte_buffer_t *data) {
     bool present = false;
-    int r = otp_container_has_slot(slot, &present);
+    int r = otp_container_has_slot_status(slot, &present);
     if (r != PICOKEYS_OK) {
         return r;
     }
@@ -431,7 +436,7 @@ int otp_container_write_slot(uint8_t slot, const uint8_t *data, size_t data_size
 
 int otp_container_delete_slot(uint8_t slot) {
     bool present = false;
-    int r = otp_container_has_slot(slot, &present);
+    int r = otp_container_has_slot_status(slot, &present);
     if (r != PICOKEYS_OK) {
         return r;
     }
@@ -457,11 +462,11 @@ int otp_container_swap_slots(uint8_t slot1, bool present1, const uint8_t *data1,
     }
     bool actual1 = false;
     bool actual2 = false;
-    int r = otp_container_has_slot(slot1, &actual1);
+    int r = otp_container_has_slot_status(slot1, &actual1);
     if (r != PICOKEYS_OK) {
         return r;
     }
-    r = otp_container_has_slot(slot2, &actual2);
+    r = otp_container_has_slot_status(slot2, &actual2);
     if (r != PICOKEYS_OK) {
         return r;
     }

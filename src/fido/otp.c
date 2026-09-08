@@ -179,7 +179,7 @@ static int otp_slot_has_data_status(uint16_t fid, bool *present) {
         *present = true;
         return PICOKEYS_OK;
     }
-    return otp_container_has_slot((uint8_t)(fid - EF_OTP_SLOT1), present);
+    return otp_container_has_slot_status((uint8_t)(fid - EF_OTP_SLOT1), present);
 }
 
 static bool otp_slot_has_data(uint16_t fid) {
@@ -203,7 +203,7 @@ static int otp_slot_load(uint16_t fid, uint8_t plain[OTP_SLOT_PLAIN_MAX], uint16
     }
     if (!file_has_data(ef)) {
         bool present = false;
-        int ret = otp_container_has_slot((uint8_t)(fid - EF_OTP_SLOT1), &present);
+        int ret = otp_container_has_slot_status((uint8_t)(fid - EF_OTP_SLOT1), &present);
         if (ret != PICOKEYS_OK) {
             return ret;
         }
