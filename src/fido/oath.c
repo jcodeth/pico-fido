@@ -142,11 +142,17 @@ const uint8_t oath_aid[] = {
     0xa0, 0x00, 0x00, 0x05, 0x27, 0x21, 0x01
 };
 
+static bool oath_code_present(void) {
+    file_t *ef_code = file_search(EF_OATH_CODE);
+    return ef_code && ef_code->data;
+}
+
 static int oath_select(app_t *a, uint8_t force) {
     (void) force;
     if (cap_supported(CAP_OATH)) {
         oath_chain_state.type = OATH_CHAIN_NONE;
-        validated = !file_has_data(file_search(EF_OATH_CODE)) && !file_has_data(file_search_by_fid(EF_OTP_PIN, NULL, SPECIFY_EF));
+        bool code_present = oath_code_present();
+        validated = !code_present && !file_has_data(file_search_by_fid(EF_OTP_PIN, NULL, SPECIFY_EF));
         otp_pin_verified = false;
         int migration_ret = oath_migrate_secrets();
         if (migration_ret != PICOKEYS_OK) {
@@ -163,7 +169,7 @@ static int oath_select(app_t *a, uint8_t force) {
         res_APDU[res_APDU_size++] = TAG_NAME;
         res_APDU[res_APDU_size++] = 8;
         memcpy(res_APDU + res_APDU_size, pico_serial_str, 8); res_APDU_size += 8;
-        if (file_has_data(file_search(EF_OATH_CODE)) == true) {
+        if (code_present) {
             random_fill_buffer(BYTE_ARRAY(challenge, sizeof(challenge)));
             res_APDU[res_APDU_size++] = TAG_CHALLENGE;
             res_APDU[res_APDU_size++] = sizeof(challenge);
