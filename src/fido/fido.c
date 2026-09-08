@@ -511,7 +511,7 @@ int scan_files_fido(void) {
 }
 
 void scan_all(void) {
-    file_scan_flash();
+    //file_scan_flash();
     scan_files_fido();
 }
 
