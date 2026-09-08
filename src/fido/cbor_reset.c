@@ -60,6 +60,7 @@ static bool fido_reset_should_clear(uint16_t fid) {
 
 typedef struct fido_reset_context {
     int ret;
+    bool metadata_failed;
 } fido_reset_context_t;
 
 static bool fido_reset_dynamic_file(file_t *file, void *ctx) {
@@ -68,8 +69,15 @@ static bool fido_reset_dynamic_file(file_t *file, void *ctx) {
     if (!fido_reset_should_clear(file->fid)) {
         return true;
     }
-    context->ret = file_delete_no_commit(file);
-    return context->ret == PICOKEYS_OK;
+    file_delete_result_t result = file_delete_no_commit_parts(file);
+    if (result.metadata != PICOKEYS_OK) {
+        context->metadata_failed = true;
+    }
+    if (result.value != PICOKEYS_OK) {
+        context->ret = result.value;
+        return false;
+    }
+    return true;
 }
 
 static int fido_reset_storage(void) {
@@ -79,14 +87,17 @@ static int fido_reset_storage(void) {
         }
     }
 
-    fido_reset_context_t context = { .ret = PICOKEYS_OK };
+    fido_reset_context_t context = {
+        .ret = PICOKEYS_OK,
+        .metadata_failed = false
+    };
     file_for_each_dynamic(fido_reset_dynamic_file, &context);
     if (context.ret != PICOKEYS_OK) {
         return context.ret;
     }
 
     flash_commit();
-    return PICOKEYS_OK;
+    return context.metadata_failed ? PICOKEYS_EXEC_ERROR : PICOKEYS_OK;
 }
 
 int cbor_reset(void) {
