@@ -810,14 +810,17 @@ int cbor_make_credential(const uint8_t *data, size_t len) {
     CBOR_CHECK(cbor_encoder_close_container(&encoder, &mapEncoder));
     resp_size = cbor_encoder_get_buffer_size(&encoder, ctap_resp->init.data + 1);
 
+    ctr++;
+    if (file_put_data(ef_counter, CONST_BYTE_ARRAY((uint8_t *)&ctr, sizeof(ctr))) != PICOKEYS_OK) {
+        CBOR_ERROR(CTAP2_ERR_PROCESSING);
+    }
+
     if (options.rk == ptrue) {
         if (credential_store(cred_id, cred_id_len, rp_id_hash, cbor_buf, rs) != 0) {
             CBOR_ERROR(CTAP2_ERR_KEY_STORE_FULL);
         }
         dev_state_update(DEV_STATE_CRED_STATE);
     }
-    ctr++;
-    file_put_data(ef_counter, CONST_BYTE_ARRAY((uint8_t *)&ctr, sizeof(ctr)));
     flash_commit();
 err:
     CBOR_FREE_BYTE_STRING(clientDataHash);
