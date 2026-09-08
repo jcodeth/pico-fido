@@ -432,7 +432,7 @@ static uint16_t calculate_crc(const uint8_t *data, size_t data_len) {
     return crc & 0xFFFF;
 }
 
-static uint8_t session_counter[2] = { 0 };
+static uint8_t session_counter[FIDO_OTP_SLOT_COUNT] = { 0 };
 static int otp_button_pressed(uint8_t slot) {
     init_otp();
     if (!cap_supported(CAP_OTP)) {
@@ -889,6 +889,9 @@ static int cmd_otp(void) {
             if (ret != PICOKEYS_OK) {
                 return SW_MEMORY_FAILURE();
             }
+            uint8_t session = session_counter[slot1 - EF_OTP_SLOT1];
+            session_counter[slot1 - EF_OTP_SLOT1] = session_counter[slot2 - EF_OTP_SLOT1];
+            session_counter[slot2 - EF_OTP_SLOT1] = session;
             config_seq++;
             return otp_status(_is_otp);
         }
@@ -928,6 +931,9 @@ static int cmd_otp(void) {
         mbedtls_platform_zeroize(data2, sizeof(data2));
         mbedtls_platform_zeroize(access_code, sizeof(access_code));
         flash_commit();
+        uint8_t session = session_counter[slot1 - EF_OTP_SLOT1];
+        session_counter[slot1 - EF_OTP_SLOT1] = session_counter[slot2 - EF_OTP_SLOT1];
+        session_counter[slot2 - EF_OTP_SLOT1] = session;
         config_seq++;
         return otp_status(_is_otp);
     }
